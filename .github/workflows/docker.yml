@@ -17,11 +17,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Build main image
         run: docker build -t vmaf .
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+      - name: Build main image
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/mehdi-ra/vmaf:latest
+          file: Dockerfile.ffmpeg
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build and push
