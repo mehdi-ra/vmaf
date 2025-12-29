@@ -4,30 +4,84 @@ FROM ghcr.io/mehdi-ra/vmaf:latest
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     autoconf automake build-essential ca-certificates cmake \
-    git libtool meson ninja-build pkg-config texinfo wget unzip yasm
+    git libtool meson ninja-build pkg-config texinfo wget unzip yasm \
+    nasm libxml2-dev libfreetype-dev libmp3lame-dev libogg-dev \
+    libvorbis-dev libopus-dev libass-dev libwebp-dev libssh-dev \
+    libvidstab-dev libopenmpt-dev librubberband-dev \
+    libsdl2-dev libzvbi-dev libchromaprint-dev libsrt-dev \
+    librist-dev libnuma-dev libvpl-dev libdrm-dev
 
 # Install libdav1d for AV1 software decoding
 RUN git clone https://code.videolan.org/videolan/dav1d.git && \
     cd dav1d && \
     meson setup build && ninja -C build && ninja -C build install && ldconfig
 
+# Build popular external codec libraries
+# H.264/AVC encoder
+RUN git clone https://code.videolan.org/videolan/x264.git && \
+    cd x264 && \
+    ./configure --enable-static --enable-pic && \
+    make -j$(nproc) && make install && ldconfig
+
+# H.265/HEVC encoder
+RUN apt-get install -y libnuma-dev && \
+    git clone https://bitbucket.org/multicoreware/x265_git.git && \
+    cd x265_git/build/linux && \
+    cmake -G "Unix Makefiles" -DENABLE_SHARED=OFF ../../source && \
+    make -j$(nproc) && make install && ldconfig
+
+# VP8/VP9 codec
+RUN git clone https://chromium.googlesource.com/webm/libvpx.git && \
+    cd libvpx && \
+    ./configure --disable-examples --disable-unit-tests --enable-vp9-highbitdepth && \
+    make -j$(nproc) && make install && ldconfig
+
+# AV1 codec
+RUN git clone https://aomedia.googlesource.com/aom && \
+    mkdir -p aom_build && cd aom_build && \
+    cmake -G "Unix Makefiles" -DENABLE_TESTS=OFF -DENABLE_NASM=on ../aom && \
+    make -j$(nproc) && make install && ldconfig
+
 # (Optional) Install libaom for AV1 support too
 RUN apt-get install -y --no-install-recommends libaom-dev
 
-# Download and build FFmpeg
+# AAC encoder
+RUN git clone https://github.com/mstorsjo/fdk-aac && \
+    cd fdk-aac && \
+    autoreconf -fiv && \
+    ./configure --disable-shared && \
+    make -j$(nproc) && make install && ldconfig
+
+# FFmpeg - Master version with comprehensive module support
 ARG FFMPEG_TAG=master
 ARG NVCC_FLAGS="-gencode arch=compute_75,code=sm_75 -gencode arch=compute_75,code=compute_75 -O2"
 
 RUN wget https://github.com/FFmpeg/FFmpeg/archive/${FFMPEG_TAG}.zip && \
     unzip ${FFMPEG_TAG}.zip
 
+# Expanded configure command with numerous additional modules
 RUN cd FFmpeg-${FFMPEG_TAG} && ./configure \
     --pkg-config-flags="--static" \
     --enable-gpl \
+    --enable-version3 \
     --enable-nonfree \
-    --enable-libdav1d \
+    # External library support
+    --enable-libx264 \
+    --enable-libx265 \
+    --enable-libvpx \
     --enable-libaom \
-    --enable-libvmaf \
+    --enable-libdav1d \
+    --enable-libfdk-aac \
+    --enable-libmp3lame \
+    --enable-libvorbis \
+    --enable-libopus \
+    --enable-libass \
+    --enable-libfreetype \
+    --enable-librubberband \
+    --enable-libwebp \
+    --enable-libopenmpt \
+    --enable-libvidstab \
+    # NVIDIA GPU support
     --enable-nvdec \
     --enable-nvenc \
     --enable-cuvid \
@@ -35,11 +89,35 @@ RUN cd FFmpeg-${FFMPEG_TAG} && ./configure \
     --enable-cuda-nvcc \
     --enable-libnpp \
     --enable-ffnvcodec \
+    # Hardware acceleration support
+    --enable-vaapi \
+    --enable-vdpau \
+    --enable-libvpl \
+    --enable-libdrm \
+    # Protocol and muxer/demuxer support
+    --enable-libsrt \
+    --enable-librist \
+    --enable-libssh \
+    --enable-libzmq \
+    --enable-libndi_newtek \
+    # Additional features
+    --enable-libchromaprint \
+    --enable-neon \
+    --enable-lto \
+    --enable-gray \
+    --enable-swscale-alpha \
+    --enable-hardcoded-tables \
+    # Disable stripping to keep debug symbols
     --disable-stripping \
     --nvccflags="${NVCC_FLAGS}" && \
     make -j$(nproc) && \
     make install && \
     ldconfig
+
+# Clean up to reduce image size
+RUN apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /tmp/* /var/tmp/*
 
 # Create a convenient data directory
 RUN mkdir /data
